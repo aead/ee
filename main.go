@@ -6,115 +6,113 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/minio/aead"
+	"github.com/minio/sio"
+
 	"golang.org/x/crypto/scrypt"
 )
 
-func printUsage() {
-	fmt.Println("Usage of ee:")
-	fmt.Println("   enc")
-	fmt.Println("      Encrypt data - see help: ee enc -h")
-	fmt.Println("   dec")
-	fmt.Println("      Decrypt data - see help: ee dec -h")
+func verifyArgs(encrypt, decrypt, keyGen, src, dst string) (ok bool) {
+	if encrypt != "" && decrypt != "" {
+		fmt.Fprintln(os.Stderr,"Cannot use -enc and -dec option at the same time")
+		return
+	}
+	if encrypt != "" && keyGen != "" {
+		fmt.Fprintln(os.Stderr,"Cannot use -enc and -gen option at the same time")
+		return
+	}
+	if decrypt != "" && keyGen != "" {
+		fmt.Fprintln(os.Stderr,"Cannot use -dec and -gen option at the same time")
+		return
+	}
+	if keyGen != "" && (src != "" || dst != "") {
+		fmt.Fprintln(os.Stderr,"Cannot use -gen with source and/or destination")
+		return
+	}
+	return true
+}
+
+func examples() {
+	fmt.Println("")
+	fmt.Println("Examples of ee:")
+	fmt.Println("")
+	fmt.Println("   Derive and print encryption key: ee -gen your-password -iv your-iv")
+	fmt.Println("   Encrypt and print file         : ee -enc your-password -iv your-iv -src /path/to/your/file")
+	fmt.Println("   Encrypted file copy            : ee -enc your-password -iv your-iv -src /path/to/your/src -dst /path/to/your/dst")
+	fmt.Println("   Decrypted file copy with pipes : cat /path/to/your/src | ee -dec your-password -iv your-iv > /path/to/your/dst")
 }
 
 func main() {
-	if len(os.Args) < 3 {
-		printUsage()
+	encrypt := flag.String("enc", "", "Encrypt data with the provided password")
+	decrypt := flag.String("dec", "", "Decrypt data with the provided password")
+	iv := flag.String("iv", "", "The IV used to derive a key from the password")
+	keyGen := flag.String("gen", "", "Generate and print the derived key from the provided password")
+	src := flag.String("src", "", "The source file ee will try to read from - default is STDIN")
+	dst := flag.String("dst", "", "The destination file ee will try to write to - default is STDOUT")
+
+	flag.Parse()
+	if len(os.Args) < 2 {
+		flag.Usage()
+		examples()
+		return
+	}
+	if !verifyArgs(*encrypt, *decrypt, *keyGen, *src, *dst) {
+		return
+	}
+	if flag.NArg() > 1 {
+		flag.Usage()
+		examples()
 		return
 	}
 
-	switch os.Args[1] {
-	default:
-		printUsage()
-		return
-	case "enc":
-		enc := flag.NewFlagSet("enc", flag.ExitOnError)
-		pwd := enc.String("pwd", "", "The password used derive a secret key and encrypt the data")
-		salt := enc.String("salt", "", "The salt used to derive a secret key from the password")
-		key := enc.String("key", "", "The secret key used to encrypt data - cannot be used with a password and must be 256 bit key as HEX")
-		if err := enc.Parse(os.Args[2:]); err != nil {
-			fmt.Println(err)
+	var err error
+	in, out := os.Stdin, os.Stdout
+	if *src != "" {
+		in, err = os.Open(*src)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to open file '%s': %v", *src, err)
+			fmt.Fprintln(os.Stderr)
 			return
 		}
-		encrypt(*pwd, *salt, *key)
-	case "dec":
-		dec := flag.NewFlagSet("dec", flag.ExitOnError)
-		pwd := dec.String("pwd", "", "The password used derive a secret key and decrypt the data")
-		salt := dec.String("salt", "", "The salt used to derive a secret key from the password")
-		key := dec.String("key", "", "The secret key used to decrypt data - cannot be used with a password and must be 256 bit key as HEX")
-		if err := dec.Parse(os.Args[2:]); err != nil {
-			fmt.Println(err)
-			return
-		}
-		decrypt(*pwd, *salt, *key)
 	}
-}
+	if *dst != "" {
+		out, err = os.Open(*dst)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to create file '%s': %v", *dst, err)
+			fmt.Fprintln(os.Stderr)
+			return
+		}
+	}
 
-func encrypt(pwd, salt, key string) {
-	if pwd != "" && key != "" {
-		fmt.Println("Cannot use password and secret key")
-		return
+	password := *encrypt
+	if *encrypt == "" {
+		password = *decrypt
 	}
-	if key != "" {
-		encKey, err := hex.DecodeString(key)
-		if err != nil {
-			fmt.Println("Failed to parse secret key - Is the key not a HEX value?")
-			return
-		}
-		if _, err = aead.Encrypt(os.Stdout, os.Stdin, aead.Config{Key: encKey}); err != nil {
-			fmt.Println("Failed to encrypt data: ", err)
-			return
-		}
-		return
-	}
-	if pwd != "" {
-		key, err := scrypt.Key([]byte(pwd), []byte(salt), 16384, 8, 1, 32)
-		if err != nil {
-			fmt.Println("Failed to derive secret key from password and salt: ", err)
-			return
-		}
-		if _, err = aead.Encrypt(os.Stdout, os.Stdin, aead.Config{Key: key}); err != nil {
-			fmt.Println("Failed to encrypt data: ", err)
-			return
-		}
-	}
-	if pwd == "" {
-		fmt.Println("Missing password and salt")
-		return
-	}
-}
 
-func decrypt(pwd, salt, key string) {
-	if pwd != "" && key != "" {
-		fmt.Println("Cannot use password and secret key")
+	key, err := scrypt.Key([]byte(password), []byte(*iv), 32768, 8, 1, 32)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to derive encryption key: %v", err)
+		fmt.Fprintln(os.Stderr)
 		return
 	}
-	if key != "" {
-		encKey, err := hex.DecodeString(key)
+
+	if *keyGen != "" {
+		fmt.Println(hex.EncodeToString(key))
+		return
+	}
+
+	if *encrypt != "" {
+		_, err = sio.Encrypt(out, in, sio.Config{Key: key})
 		if err != nil {
-			fmt.Println("Failed to parse secret key - Is the key not a HEX value?")
+			fmt.Fprintf(os.Stderr, "Failed to encrypt data: %v", err)
+			fmt.Fprintln(os.Stderr)
 			return
 		}
-		if _, err = aead.Decrypt(os.Stdout, os.Stdin, aead.Config{Key: encKey}); err != nil {
-			fmt.Println("Failed to decrypt data: ", err)
-			return
-		}
-		return
-	}
-	if pwd != "" {
-		key, err := scrypt.Key([]byte(pwd), []byte(salt), 16384, 8, 1, 32)
+	} else {
+		_, err = sio.Decrypt(out, in, sio.Config{Key: key})
 		if err != nil {
-			fmt.Println("Failed to derive secret key from password and salt: ", err)
+			fmt.Fprintf(os.Stderr, "Failed to decrypt data: %v", err)
+			fmt.Fprintln(os.Stderr)
 			return
 		}
-		if _, err = aead.Decrypt(os.Stdout, os.Stdin, aead.Config{Key: key}); err != nil {
-			fmt.Println("Failed to decrypt data: ", err)
-			return
-		}
-	}
-	if pwd == "" {
-		fmt.Println("Missing password and salt")
-		return
 	}
 }
