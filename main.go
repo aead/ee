@@ -75,7 +75,7 @@ func main() {
 		}
 	}
 	if *dst != "" {
-		out, err = os.Open(*dst)
+		out, err = os.Create(*dst)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to create file '%s': %v", *dst, err)
 			fmt.Fprintln(os.Stderr)
