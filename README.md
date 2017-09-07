@@ -20,16 +20,16 @@ Usage of ee:
         Encrypt data with the provided password
   -gen string
         Generate and print the derived key from the provided password
-  -iv string
-        The IV used to derive a key from the password
+  -salt string
+        The salt used to derive a key from the password
   -src string
         The source file ee will try to read from - default is STDIN
 
 Examples of ee:
 
-   Derive and print encryption key: ee -gen your-password -iv your-iv
-   Encrypt and print file         : ee -enc your-password -iv your-iv -src /path/to/your/file
-   Encrypted file copy            : ee -enc your-password -iv your-iv -src /path/to/your/src -dst /path/to/your/dst
-   Decrypted file copy with pipes : cat /path/to/your/src | ee -dec your-password -iv your-iv > /path/to/your/dst
+   Derive and print encryption key: ee -gen your-password -salt your-salt
+   Encrypt and print file         : ee -enc your-password -salt your-salt -src /path/to/your/file
+   Encrypted file copy            : ee -enc your-password -salt your-salt -src /path/to/your/src -dst /path/to/your/dst
+   Decrypted file copy with pipes : cat /path/to/your/src | ee -dec your-password -salt your-salt > /path/to/your/dst
 ```
 
