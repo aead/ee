@@ -58,7 +58,7 @@ func main() {
 	if !verifyArgs(*encrypt, *decrypt, *keyGen, *src, *dst) {
 		return
 	}
-	if flag.NArg() > 1 {
+	if flag.NArg() > 0 {
 		flag.Usage()
 		examples()
 		return
